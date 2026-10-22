@@ -55,9 +55,10 @@
   function syncEntry(entry, quiet) {
     if (!activeAccount || !entry || !entry.id) return Promise.resolve(false);
     var id = String(entry.id);
+    var targetAccountId = String(activeAccount.id);
     var previous = syncQueue[id] || Promise.resolve();
     var next = previous.catch(function () {}).then(function () {
-      if (!activeAccount) return false;
+      if (!activeAccount || String(activeAccount.id) !== targetAccountId) return false;
       return requestApi('/api/games', 'POST', entry).then(function () {
         return true;
       });
@@ -194,7 +195,7 @@
       }).catch(function () {
         if (generation !== accountGeneration) return;
         // Local cache remains usable if the API is temporarily unavailable.
-        writeAll(mergeLists(cachedAtStart, guestGames));
+        writeAll(mergeLists(mergeLists(cachedAtStart, readAll()), guestGames));
         accountLoaded = false;
         U.toast('Account history could not be loaded. Your local games are still available.', 'error');
       });
