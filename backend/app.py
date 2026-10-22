@@ -96,7 +96,7 @@ class MySQLConnection:
     def execute(self, sql, params=()):
         # Existing SQLite queries use ? placeholders and case-insensitive
         # comparisons. The configured MySQL tables use a case-insensitive collation.
-        sql = re.sub(r"\\s+COLLATE NOCASE\\b", "", sql, flags=re.IGNORECASE)
+                sql = re.sub(r"\s+COLLATE NOCASE\b", "", sql, flags=re.IGNORECASE)
         sql = sql.replace("?", "%s")
         cursor = self.connection.cursor()
         cursor.execute(sql, params)
@@ -119,7 +119,7 @@ def init_user_db():
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS users ("
                 "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
-                "username VARCHAR(32) NOT NULL COLLATE utf8mb4_unicode_ci, "
+                "username VARCHAR(32) NOT NULL, "
                 "password_hash VARCHAR(255) NOT NULL, "
                 "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "email VARCHAR(254) NULL, google_sub VARCHAR(255) NULL, "
