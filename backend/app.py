@@ -96,7 +96,7 @@ class MySQLConnection:
     def execute(self, sql, params=()):
         # Existing SQLite queries use ? placeholders and case-insensitive
         # comparisons. The configured MySQL tables use a case-insensitive collation.
-                sql = re.sub(r"\s+COLLATE NOCASE\b", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s+COLLATE NOCASE\b", "", sql, flags=re.IGNORECASE)
         sql = sql.replace("?", "%s")
         cursor = self.connection.cursor()
         cursor.execute(sql, params)
@@ -378,7 +378,7 @@ def auth_google():
                                        (candidate, generate_password_hash(secrets.token_urlsafe(40)), email, subject))
                     uid, username = cur.lastrowid, candidate
                     break
-                except sqlite3.IntegrityError:
+                except DB_INTEGRITY_ERRORS:
                     continue
             else:
                 return error("Could not create a unique local profile for this Google account.", 409)
