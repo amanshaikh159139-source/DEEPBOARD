@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepBoard - play, analyze and review chess</title>
+  <meta name="description" content="Play the bot, play a friend on one screen, and review every move of your games with Stockfish. Runs on your own computer.">
+
+  <!-- Fonts are optional: without internet the page falls back to your system fonts. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Source+Serif+4:opsz,wght@8..60,400..700&display=swap" rel="stylesheet">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231B5A73'/%3E%3Cpath d='M10 25c-.4-4 1.2-6.4 4.4-8.8-1.4-.1-2.5.4-3.7 1.8l-2-.8c-.4-2 1.2-3.4 2.9-5.3.8-1.1 1-2.3.8-3.8l2.2 1.5c1-1.1 1.8-2.1 2.5-3.2l1 2.2c5.4 1.2 8 6 8 12 0 2.3-.4 4.4-.6 7z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer onload="window.DeepBoardGoogleLoaded && window.DeepBoardGoogleLoaded()"></script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- ============================ HEADER ============================ -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/home" aria-label="DeepBoard home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M10 25c-.4-4 1.2-6.4 4.4-8.8-1.4-.1-2.5.4-3.7 1.8l-2-.8c-.4-2 1.2-3.4 2.9-5.3.8-1.1 1-2.3.8-3.8l2.2 1.5c1-1.1 1.8-2.1 2.5-3.2l1 2.2c5.4 1.2 8 6 8 12 0 2.3-.4 4.4-.6 7z"/></svg>
+      </span>
+      <span class="brand-name">DeepBoard</span>
+    </a>
+
+    <nav class="nav" aria-label="Main">
+      <a href="#/home" data-route="home">Home</a>
+      <a href="#/play" data-route="play">Play</a>
+      <a href="#/analyze" data-route="analyze">Analyze</a>
+      <a href="#/history" data-route="history">History</a>
+      <a href="#/profile" data-route="profile">Profile</a>
+      <a href="#/puzzle" data-route="puzzle">Deep Puzzle</a>
+      <a href="#/openings" data-route="openings">Openings</a>
+    </nav>
+
+    <div class="topbar-tools">
+      <span id="engine-badge" class="engine-badge checking" title="Checking the engine...">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="engine-text">Checking engine</span>
+      </span>
+      <a class="btn small account-link" href="#/auth" id="account-link">Sign in</a>
+      <label class="theme-picker">
+        <span class="visually-hidden">Board colours</span>
+        <select id="theme-select" aria-label="Board colours" title="Board colours"></select>
+      </label>
+      <label class="theme-picker ui-theme-picker">
+        <span class="visually-hidden">Interface colour</span>
+        <select id="ui-theme-select" aria-label="Interface colour" title="Interface colour"></select>
+      </label>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============================ HOME ============================ -->
+  <section id="view-home" class="view" hidden>
+    <div class="home home-minimal">
+      <div class="home-copy"><p class="eyebrow">YOUR CHESS WORKSPACE</p><h1>Play. Learn. Improve.</h1><p class="lead">Everything you need for your next move.</p></div>
+      <div class="home-slides" aria-label="DeepBoard features">
+        <a class="home-slide slide-play" href="#/play"><span class="slide-icon">♞</span><strong>Play</strong><small>Challenge a bot or play with a friend.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+        <a class="home-slide slide-analyze" href="#/analyze"><span class="slide-icon">⌁</span><strong>Analyse</strong><small>Review games and explore engine lines.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+        <a class="home-slide slide-puzzle" href="#/puzzle"><span class="slide-icon">♟</span><strong>Puzzle</strong><small>Solve tactics, forks and checkmates.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+        <a class="home-slide slide-history" href="#/history"><span class="slide-icon">◷</span><strong>History</strong><small>Return to saved games and analysis.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+        <a class="home-slide slide-profile" href="#/profile"><span class="slide-icon">◎</span><strong>Profile</strong><small>Track results and puzzle progress.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+        <a class="home-slide slide-openings" href="#/openings"><span class="slide-icon">♜</span><strong>Opening learnings</strong><small>Learn plans and ideas behind openings.</small><span class="slide-arrow" aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ PLAY ============================ -->
+  <section id="view-play" class="view" hidden>
+    <div class="game-layout">
+
+      <div class="game-col">
+        <div class="player-bar" id="play-top">
+          <span class="swatch" id="play-top-swatch"></span>
+          <span class="pname" id="play-top-name">Bot</span>
+          <span class="captured" id="play-top-captured"></span>
+          <span class="material" id="play-top-material"></span>
+        </div>
+        <div class="board-wrap"><div id="play-board"></div></div>
+        <div class="player-bar" id="play-bottom">
+          <span class="swatch" id="play-bottom-swatch"></span>
+          <span class="pname" id="play-bottom-name">You</span>
+          <span class="captured" id="play-bottom-captured"></span>
+          <span class="material" id="play-bottom-material"></span>
+        </div>
+      </div>
+
+      <aside class="side" aria-label="Game controls">
+        <div class="seg" role="group" aria-label="Game mode">
+          <button type="button" data-mode="bot" class="active">Play the bot</button>
+          <button type="button" data-mode="two">Two players</button>
+        </div>
+
+        <form id="play-setup" class="setup" autocomplete="off">
+          <div id="bot-fields">
+            <fieldset class="field">
+              <legend>You play</legend>
+              <div class="choice-row">
+                <label class="choice"><input type="radio" name="side" value="white" checked><span>White</span></label>
+                <label class="choice"><input type="radio" name="side" value="black"><span>Black</span></label>
+                <label class="choice"><input type="radio" name="side" value="random"><span>Random</span></label>
+              </div>
+            </fieldset>
+            <div class="field">
+              <label for="level-range">Bot strength: <strong id="level-name">Club player</strong> <span class="muted" id="level-hint">about 1500 Elo</span></label>
+              <input type="range" id="level-range" min="1" max="7" step="1" value="3">
+            </div>
+            <div class="bot-profile" id="bot-profile" aria-live="polite"><img id="bot-avatar" src="assets/bots/club.svg" alt="Club Player avatar"><div><strong id="bot-profile-name">Club Player</strong><small id="bot-profile-strength">Approximate strength 1500</small></div><span class="bot-profile-badge">Opponent</span></div>
+          </div>
+
+          <div id="two-fields" hidden>
+            <div class="field-pair">
+              <div class="field">
+                <label for="name-white">White player</label>
+                <input type="text" id="name-white" maxlength="24" placeholder="White">
+              </div>
+              <div class="field">
+                <label for="name-black">Black player</label>
+                <input type="text" id="name-black" maxlength="24" placeholder="Black">
+              </div>
+            </div>
+            <label class="check"><input type="checkbox" id="auto-flip"><span>Turn the board after every move</span></label>
+          </div>
+
+          <button type="submit" class="btn primary wide" id="play-start">Start new game</button>
+        </form>
+
+        <div id="play-status" class="status" role="status" aria-live="polite">Choose your settings and start a game.</div>
+
+        <ol id="play-moves" class="movelist" aria-label="Moves"></ol>
+
+        <div class="controls">
+          <button type="button" class="btn small" id="btn-undo">Undo</button>
+          <button type="button" class="btn small" id="btn-flip">Flip board</button>
+          <button type="button" class="btn small" id="btn-hint">Hint</button>
+          <button type="button" class="btn small" id="btn-draw">Agree a draw</button>
+          <button type="button" class="btn small danger" id="btn-resign">Resign</button>
+        </div>
+        <div class="controls">
+          <button type="button" class="btn small" id="btn-analyze">Analyze game</button>
+          <button type="button" class="btn small" id="btn-pgn-copy">Copy PGN</button>
+          <button type="button" class="btn small" id="btn-pgn-download">Download PGN</button>
+        </div>
+      </aside>
+
+    </div>
+    <div id="game-result-overlay" class="result-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="game-result-title"><div class="result-card" id="game-result-card"><div class="result-spark" aria-hidden="true">✦</div><p class="eyebrow" id="game-result-kicker">GAME FINISHED</p><h2 id="game-result-title">Good game!</h2><p id="game-result-message">Review the game and learn your next lesson.</p><div class="result-actions"><button type="button" class="btn primary" id="result-rematch">Play again</button><button type="button" class="btn" id="result-review">Review game</button><button type="button" class="btn quiet" id="result-home">Home</button></div></div></div>
+  </section>
+
+  <!-- ============================ ANALYZE ============================ -->
+  <section id="view-analyze" class="view" hidden>
+
+    <!-- Step 1: choose a game -->
+    <div id="analyze-input" class="analyze-input">
+      <h1 class="page-title">Analyze a game</h1>
+      <p class="lead small">Paste a PGN, upload a .pgn file, or import your recent games from chess.com. Every move is checked by the engine and rated.</p>
+
+      <div class="tabs" role="tablist" aria-label="Where is the game?">
+        <button type="button" role="tab" class="tab active" data-tab="paste" aria-selected="true">Paste PGN</button>
+        <button type="button" role="tab" class="tab" data-tab="upload" aria-selected="false">Upload file</button>
+        <button type="button" role="tab" class="tab" data-tab="chesscom" aria-selected="false">Import from chess.com</button>
+      </div>
+
+      <div class="tabpanel" id="tab-paste">
+        <label class="visually-hidden" for="pgn-text">PGN text</label>
+        <textarea id="pgn-text" rows="9" spellcheck="false" placeholder='[White "Anna"]&#10;[Black "Ben"]&#10;&#10;1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 ...'></textarea>
+        <div class="row">
+          <button type="button" class="btn primary" id="btn-run-paste">Run analysis</button>
+          <button type="button" class="btn quiet" id="btn-sample">Use a sample game</button>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="tab-upload" hidden>
+        <label class="dropzone" for="pgn-file">
+          <input type="file" id="pgn-file" accept=".pgn,.txt,text/plain">
+          <span class="dropzone-title">Choose a .pgn file</span>
+          <span class="dropzone-sub" id="file-name">or drop it here. Only the first game in the file is used.</span>
+        </label>
+        <div class="row">
+          <button type="button" class="btn primary" id="btn-run-file" disabled>Run analysis</button>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="tab-chesscom" hidden>
+        <form id="cc-form" class="row inline-form">
+          <div class="field grow">
+            <label for="cc-user">chess.com username</label>
+            <input type="text" id="cc-user" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="for example, hikaru">
+          </div>
+          <button type="submit" class="btn primary" id="btn-cc-find">Find games</button>
+        </form>
+        <div id="cc-status" class="inline-status" role="status" aria-live="polite"></div>
+        <ul id="cc-list" class="cc-list"></ul>
+      </div>
+
+      <div class="speed-row">
+        <label for="speed">Analysis depth</label>
+        <select id="speed"></select>
+        <span class="muted" id="speed-hint"></span>
+      </div>
+    </div>
+
+    <!-- Step 2: engine is working -->
+    <div id="analyze-progress" class="progress-card" hidden>
+      <h2 id="progress-title">Analyzing</h2>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
+      <p id="progress-text" class="muted">Starting the engine...</p>
+      <button type="button" class="btn" id="btn-cancel">Cancel</button>
+    </div>
+
+    <!-- Step 3: the review -->
+    <div id="analyze-report" hidden>
+      <div class="report-head">
+        <div>
+          <h1 class="page-title" id="an-title">Game review</h1>
+          <p class="muted" id="an-subtitle"></p>
+        </div>
+        <div class="report-actions">
+          <button type="button" class="btn" id="an-save">Save to history</button>
+          <button type="button" class="btn" id="an-pgn">Download PGN</button>
+          <button type="button" class="btn" id="an-new">Analyze another game</button>
+        </div>
+      </div>
+
+      <div class="game-layout report">
+        <div class="game-col">
+          <div class="player-bar" id="an-top">
+            <span class="swatch" id="an-top-swatch"></span>
+            <span class="pname" id="an-top-name"></span>
+            <span class="accuracy" id="an-top-acc"></span>
+          </div>
+          <div class="board-with-eval">
+            <div class="evalbar" id="an-evalbar" aria-label="Evaluation"><div class="evalbar-fill" id="an-evalfill"></div><span class="evalbar-text" id="an-evaltext">0.0</span></div>
+            <div class="board-wrap"><div id="an-board"></div></div>
+          </div>
+          <div class="player-bar" id="an-bottom">
+            <span class="swatch" id="an-bottom-swatch"></span>
+            <span class="pname" id="an-bottom-name"></span>
+            <span class="accuracy" id="an-bottom-acc"></span>
+          </div>
+        </div>
+
+        <aside class="side" aria-label="Review">
+          <div class="nav-buttons" role="group" aria-label="Move through the game">
+            <button type="button" class="btn icon" id="an-first" aria-label="First position" title="First position (Home)">&#x23EE;</button>
+            <button type="button" class="btn icon" id="an-prev" aria-label="Previous move" title="Previous move (Left arrow)">&#x25C0;</button>
+            <button type="button" class="btn icon" id="an-next" aria-label="Next move" title="Next move (Right arrow)">&#x25B6;</button>
+            <button type="button" class="btn icon" id="an-last" aria-label="Last position" title="Last position (End)">&#x23ED;</button>
+            <button type="button" class="btn icon" id="an-flip" aria-label="Flip board" title="Flip board">&#x21C5;</button>
+          </div>
+
+          <div class="engine-line" id="an-engine" aria-live="polite"></div>
+
+          <ol id="an-moves" class="movelist tall" aria-label="Moves"></ol>
+
+          <table class="summary" id="an-summary">
+            <thead><tr><th scope="col">Move quality</th><th scope="col" id="an-sum-white">White</th><th scope="col" id="an-sum-black">Black</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </aside>
+      </div>
+
+      <div class="graph-card">
+        <h2 class="small-title">Advantage over the game</h2>
+        <div id="an-graph" class="graph"></div>
+        <p class="muted small">Click the graph to jump to that move. Dots mark mistakes and blunders.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ HISTORY ============================ -->
+  <section id="view-history" class="view" hidden>
+    <div class="report-head">
+      <div>
+        <h1 class="page-title">Your games</h1>
+        <p class="muted">Saved in this browser. Finished games from Play and every game you save from a review show up here.</p>
+      </div>
+      <button type="button" class="btn danger" id="btn-history-clear">Delete all</button>
+    </div>
+    <div id="history-empty" class="empty" hidden>
+      <p>No saved games yet.</p>
+      <div class="row">
+        <a class="btn primary" href="#/play">Play a game</a>
+        <a class="btn" href="#/analyze">Analyze a game</a>
+      </div>
+    </div>
+    <ul id="history-list" class="history-list"></ul>
+  </section>
+
+
+  <!-- ============================ PROFILE ============================ -->
+  <section id="view-profile" class="view" hidden>
+    <div class="report-head"><div><p class="eyebrow">PLAYER OVERVIEW</p><h1 class="page-title">Your profile</h1><p class="muted">Your saved games and progress, collected in one place.</p></div><a class="btn" href="#/history">Open game library</a></div>
+    <div id="profile-guest" class="empty"><h2>Make DeepBoard yours</h2><p>Sign in to keep a local account profile. Your existing game history remains in this browser.</p><a class="btn primary" href="#/auth">Sign in or create account</a></div>
+    <div id="profile-content" hidden>
+      <div class="profile-hero"><div class="avatar" id="profile-avatar">D</div><div><h2 id="profile-name">Player</h2><p class="muted" id="profile-subtitle">DeepBoard member</p></div><div class="profile-spacer"></div><button class="btn small" id="profile-logout" type="button">Sign out</button></div>
+      <div class="stat-grid" id="profile-stats"></div>
+      <div class="profile-grid"><article class="feature-card"><div class="card-heading"><div><p class="eyebrow">PERFORMANCE</p><h2>Game results</h2></div><span class="muted small">From saved games</span></div><div id="profile-results" class="result-bars"></div></article>
+      <article class="feature-card"><div class="card-heading"><div><p class="eyebrow">MOVE QUALITY</p><h2>Analysis highlights</h2></div></div><div id="profile-moves" class="move-stats"></div></article></div>
+      <article class="feature-card profile-games"><div class="card-heading"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Recent games</h2></div><a href="#/history">View all</a></div><div id="profile-recent"></div></article>
+      <p class="muted small profile-note">World percentile and rating history are shown only when a trustworthy source provides the necessary data. This local version does not invent a global ranking. Game history is stored in this browser; account sign-in does not yet sync games between devices.</p>
+    </div>
+  </section>
+
+  <!-- ============================ DEEP PUZZLE ============================ -->
+  <section id="view-puzzle" class="view" hidden>
+    <div class="report-head"><div><p class="eyebrow">TACTICAL TRAINING</p><h1 class="page-title">Puzzle</h1><p class="muted">Find the winning tactic. Every position has a verified line.</p></div><div class="puzzle-rating"><span class="muted small">Puzzle rating</span><strong id="puzzle-rating">800</strong></div></div>
+    <div class="puzzle-layout"><div class="puzzle-board-panel"><div id="puzzle-board" class="puzzle-board"></div><div id="puzzle-status" class="status" role="status" aria-live="polite">Find the best move.</div></div><aside class="feature-card puzzle-controls"><span class="tag" id="puzzle-theme">Tactics</span><h2 id="puzzle-title">Find the best move</h2><p id="puzzle-description">Look for a forcing move.</p><div class="puzzle-objective"><span>Objective</span><strong id="puzzle-objective">Win material</strong></div><div class="puzzle-actions"><button class="btn primary wide" id="puzzle-next" type="button">Next puzzle</button><button class="btn wide" id="puzzle-hint" type="button">Hint</button><button class="btn wide" id="puzzle-solution" type="button">Show solution</button><button class="btn quiet wide" id="puzzle-reset" type="button">Reset position</button></div><div class="puzzle-metrics"><div><span class="muted small">Solved</span><strong id="puzzle-solved">0</strong></div><div><span class="muted small">Attempts</span><strong id="puzzle-attempts">0</strong></div></div><p class="muted small">Practice rating is saved in this browser and is separate from official chess ratings.</p></aside></div>
+  </section>
+
+  <!-- ============================ OPENINGS ============================ -->
+  <section id="view-openings" class="view" hidden>
+    <div class="report-head"><div><p class="eyebrow">OPENING SCHOOL</p><h1 class="page-title">Learn an opening</h1><p class="muted">Explore the idea, play through a line, then practice against the bot.</p></div></div>
+    <div class="opening-layout"><div class="feature-card opening-list-card"><label for="opening-select">Choose an opening</label><select id="opening-select" class="opening-select"></select><div id="opening-list" class="opening-list"></div></div><div class="feature-card opening-detail"><div class="card-heading"><div><p class="eyebrow" id="opening-side">OPENING GUIDE</p><h2 id="opening-title">Italian Game</h2></div><span class="tag" id="opening-eco">C50</span></div><p id="opening-summary">Develop quickly and fight for the centre.</p><div class="opening-line" id="opening-line"></div><div class="opening-actions"><button class="btn" id="opening-reset" type="button">Reset line</button><button class="btn primary" id="opening-practice" type="button">Practice this opening</button></div><div id="opening-practice-note" class="inline-status" role="status"></div></div></div>
+    <p class="muted small profile-note">Opening lines are starter examples for learning. Bot practice launches the existing Play page; a fully constrained opening-specific sparring mode is not yet wired into the current game engine.</p>
+  </section>
+
+  <!-- ============================ GUIDE ============================ -->
+  <button type="button" id="guide-launcher" class="guide-launcher" aria-label="Open DeepBoard Guide">✦ <span>Guide</span></button>
+  <aside id="guide-panel" class="guide-panel" hidden aria-label="DeepBoard Guide chat"><div class="guide-head"><div><strong>DeepBoard Guide</strong><small>Help with the app and chess basics</small></div><button type="button" id="guide-close" class="guide-close" aria-label="Close guide">×</button></div><div id="guide-messages" class="guide-messages"><div class="guide-message bot">Hi! I can help you navigate DeepBoard. Try asking how to import games, analyze a position, learn an opening, or use Deep Puzzle.</div></div><div class="guide-suggestions"><button type="button" data-guide-prompt="How do I import my games?">Import games</button><button type="button" data-guide-prompt="How does Deep Puzzle work?">Deep Puzzle</button><button type="button" data-guide-prompt="How do I learn an opening?">Learn openings</button></div><form id="guide-form" class="guide-form"><input id="guide-input" placeholder="Ask about chess or another topic…" maxlength="500" autocomplete="off" aria-label="Message DeepBoard Guide"><button class="btn primary" type="submit">Send</button></form><p class="muted small guide-disclaimer">Chess help works locally; general AI chat can be enabled with an API key.</p></aside>
+
+  <!-- ============================ AUTH ============================ -->
+  <section id="view-auth" class="view" hidden>
+    <div class="auth-shell"><div class="auth-brand"><span class="brand-mark">♞</span><p class="eyebrow">WELCOME TO DEEPBOARD</p><h1 id="auth-title">Your next move starts here.</h1><p class="muted">Sign in to keep your player profile together.</p></div>
+      <form id="auth-form" class="feature-card auth-form" autocomplete="on"><div class="auth-toggle"><button type="button" id="auth-mode-login" class="active">Sign in</button><button type="button" id="auth-mode-register">Create account</button></div>
+        <label for="auth-username" id="auth-username-label">Username or email</label><input id="auth-username" required minlength="3" maxlength="254" autocomplete="username" placeholder="Your username or email" spellcheck="false">
+        <div id="auth-email-group" hidden><label for="auth-email">Email address</label><input id="auth-email" type="email" maxlength="254" autocomplete="email" placeholder="you@example.com"></div>
+        <label for="auth-password">Password</label><div class="password-wrap"><input id="auth-password" type="password" required minlength="8" maxlength="128" autocomplete="current-password" placeholder="At least 8 characters"><button type="button" id="password-toggle" class="password-toggle" aria-label="Show password" aria-pressed="false">Show</button></div>
+        <div id="auth-error" class="inline-status" role="status" aria-live="polite"></div><button type="submit" class="btn primary wide" id="auth-submit">Sign in</button>
+        <div class="auth-divider"><span>or</span></div><div id="google-signin-provider" class="google-signin-provider" hidden></div><button type="button" class="btn google-button wide" id="google-signin-button"><span class="google-g" aria-hidden="true">G</span> Continue with Google</button>
+        <p class="muted small" id="google-signin-note">Local login works without external credentials. Google Sign-In needs OAuth setup.</p><p class="muted small">Passwords are securely hashed on the backend. Use a unique password.</p>
+      </form>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  DeepBoard is a student project built on the free, open-source Stockfish engine. It is not affiliated with chess.com.
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- Order matters: each file uses the ones above it. -->
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/chess-rules.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/pieces.js"></script>
+<script src="js/board.js"></script>
+<script src="js/api.js"></script>
+<script src="js/store.js"></script>
+<script src="js/home.js"></script>
+<script src="js/play.js"></script>
+<script src="js/scoring.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/history.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/puzzle.js"></script>
+<script src="js/openings.js"></script>
+<script src="js/guide.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

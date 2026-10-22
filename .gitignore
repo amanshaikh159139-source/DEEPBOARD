@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+backend/venv/
+.venv/
+backend/stockfish/*
+!backend/stockfish/PUT_STOCKFISH_HERE.txt
+backend/deepboard_users.sqlite3
+backend/.session_secret
+backend/__pycache__/
+
+backend/.env

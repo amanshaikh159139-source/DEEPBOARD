@@ -1,0 +1,11 @@
+Put the Stockfish program in this folder (a subfolder is fine too).
+
+1. Download Stockfish from https://stockfishchess.org/download/
+2. Extract it and copy the engine file here. It is named like:
+     stockfish-windows-x86-64-avx2.exe      (Windows)
+     stockfish-macos-m1-apple-silicon       (Mac with Apple chip)
+     stockfish-ubuntu-x86-64-avx2           (Linux)
+3. Restart "python app.py".
+
+If the engine does not start, download the plain "x86-64" build instead of "avx2".
+Without Stockfish the app still works, using a weaker built-in engine.
