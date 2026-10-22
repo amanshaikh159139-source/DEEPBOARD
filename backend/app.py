@@ -59,7 +59,7 @@ else:
         with open(_secret_path, "w", encoding="utf-8") as _secret_file:
             _secret_file.write(app.secret_key)
 
-DB_PATH = os.path.join(BASE_DIR, "deepboard_users.sqlite3")
+DB_PATH = os.environ.get("DEEPBOARD_DB_PATH", os.path.join(BASE_DIR, "deepboard_users.sqlite3"))
 DB_BACKEND = os.environ.get("DB_BACKEND", "sqlite").strip().lower()
 
 
