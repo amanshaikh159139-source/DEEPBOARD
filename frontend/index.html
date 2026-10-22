@@ -282,7 +282,7 @@
     <div class="report-head">
       <div>
         <h1 class="page-title">Your games</h1>
-        <p class="muted">Saved in this browser. Finished games from Play and every game you save from a review show up here.</p>
+        <p class="muted">Saved in this browser and, when signed in, your DeepBoard account. Finished games from Play and saved reviews show up here.</p>
       </div>
       <button type="button" class="btn danger" id="btn-history-clear">Delete all</button>
     </div>
@@ -300,14 +300,14 @@
   <!-- ============================ PROFILE ============================ -->
   <section id="view-profile" class="view" hidden>
     <div class="report-head"><div><p class="eyebrow">PLAYER OVERVIEW</p><h1 class="page-title">Your profile</h1><p class="muted">Your saved games and progress, collected in one place.</p></div><a class="btn" href="#/history">Open game library</a></div>
-    <div id="profile-guest" class="empty"><h2>Make DeepBoard yours</h2><p>Sign in to keep a local account profile. Your existing game history remains in this browser.</p><a class="btn primary" href="#/auth">Sign in or create account</a></div>
+    <div id="profile-guest" class="empty"><h2>Make DeepBoard yours</h2><p>Sign in to sync saved games and build your personal profile. Guest history stays in this browser.</p><a class="btn primary" href="#/auth">Sign in or create account</a></div>
     <div id="profile-content" hidden>
       <div class="profile-hero"><div class="avatar" id="profile-avatar">D</div><div><h2 id="profile-name">Player</h2><p class="muted" id="profile-subtitle">DeepBoard member</p></div><div class="profile-spacer"></div><button class="btn small" id="profile-logout" type="button">Sign out</button></div>
       <div class="stat-grid" id="profile-stats"></div>
       <div class="profile-grid"><article class="feature-card"><div class="card-heading"><div><p class="eyebrow">PERFORMANCE</p><h2>Game results</h2></div><span class="muted small">From saved games</span></div><div id="profile-results" class="result-bars"></div></article>
       <article class="feature-card"><div class="card-heading"><div><p class="eyebrow">MOVE QUALITY</p><h2>Analysis highlights</h2></div></div><div id="profile-moves" class="move-stats"></div></article></div>
       <article class="feature-card profile-games"><div class="card-heading"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Recent games</h2></div><a href="#/history">View all</a></div><div id="profile-recent"></div></article>
-      <p class="muted small profile-note">World percentile and rating history are shown only when a trustworthy source provides the necessary data. This local version does not invent a global ranking. Game history is stored in this browser; account sign-in does not yet sync games between devices.</p>
+      <p class="muted small profile-note">World percentile and rating history are shown only when a trustworthy source provides the necessary data. This local version does not invent a global ranking. Guest history stays in this browser; signed-in games sync through the configured account database.</p>
     </div>
   </section>
 

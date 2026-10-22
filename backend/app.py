@@ -19,11 +19,19 @@ browser: frontend/js/chess-rules.js.  The backend only hosts Stockfish.
 import os
 import re
 import sqlite3
+import json
 import secrets
 import time
 import threading
 import requests
 from dotenv import load_dotenv
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+except ImportError:  # SQLite remains usable without the optional MySQL driver.
+    pymysql = None
+    DictCursor = None
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
 
@@ -51,10 +59,55 @@ else:
         with open(_secret_path, "w", encoding="utf-8") as _secret_file:
             _secret_file.write(app.secret_key)
 
-DB_PATH = os.path.join(BASE_DIR, "deepboard_users.sqlite3")
+DB_PATH = os.environ.get("DEEPBOARD_DB_PATH", os.path.join(BASE_DIR, "deepboard_users.sqlite3"))
+DB_BACKEND = os.environ.get("DB_BACKEND", "sqlite").strip().lower()
+
+
+class MySQLConnection:
+    """Small sqlite-like adapter so the existing auth queries can use MySQL too."""
+    def __init__(self):
+        if pymysql is None:
+            raise RuntimeError("MySQL mode needs PyMySQL. Run: python -m pip install -r requirements.txt")
+        self.connection = pymysql.connect(
+            host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MYSQL_PORT", "3306")),
+            user=os.environ.get("MYSQL_USER", "root"),
+            password=os.environ.get("MYSQL_PASSWORD", ""),
+            database=os.environ.get("MYSQL_DATABASE", "deepboard_db"),
+            charset="utf8mb4",
+            cursorclass=DictCursor,
+            autocommit=False,
+            connect_timeout=5,
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type is None:
+                self.connection.commit()
+            else:
+                self.connection.rollback()
+        finally:
+            self.connection.close()
+        return False
+
+    def execute(self, sql, params=()):
+        # Existing SQLite queries use ? placeholders and case-insensitive
+        # comparisons. The configured MySQL tables use a case-insensitive collation.
+        sql = re.sub(r"\s+COLLATE NOCASE\b", "", sql, flags=re.IGNORECASE)
+        sql = sql.replace("?", "%s")
+        cursor = self.connection.cursor()
+        cursor.execute(sql, params)
+        return cursor
 
 
 def db_connect():
+    if DB_BACKEND == "mysql":
+        return MySQLConnection()
+    if DB_BACKEND != "sqlite":
+        raise RuntimeError("DB_BACKEND must be either 'sqlite' or 'mysql'.")
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -62,6 +115,42 @@ def db_connect():
 
 def init_user_db():
     with db_connect() as conn:
+        if DB_BACKEND == "mysql":
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "username VARCHAR(32) NOT NULL, "
+                "password_hash VARCHAR(255) NOT NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "email VARCHAR(254) NULL, google_sub VARCHAR(255) NULL, "
+                "UNIQUE KEY uq_users_username (username), "
+                "UNIQUE KEY uq_users_email (email), "
+                "UNIQUE KEY uq_users_google_sub (google_sub)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            columns = {row["Field"] for row in conn.execute("SHOW COLUMNS FROM users").fetchall()}
+            if "email" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN email VARCHAR(254) NULL")
+            if "google_sub" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN google_sub VARCHAR(255) NULL")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS games ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "user_id BIGINT UNSIGNED NOT NULL, game_key VARCHAR(128) NOT NULL, "
+                "source VARCHAR(32) NULL, ref VARCHAR(1024) NULL, "
+                "white VARCHAR(255) NULL, black VARCHAR(255) NULL, "
+                "result VARCHAR(8) NULL, reason VARCHAR(255) NULL, "
+                "game_date VARCHAR(32) NULL, plies INT UNSIGNED NULL, pgn LONGTEXT NULL, "
+                "analysis_json LONGTEXT NULL, game_json LONGTEXT NOT NULL, "
+                "saved_at BIGINT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                "UNIQUE KEY uq_games_user_game (user_id, game_key), "
+                "KEY idx_games_user_saved (user_id, saved_at), "
+                "CONSTRAINT fk_games_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            return
+
         conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
         # Additive migrations preserve existing local accounts.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -71,6 +160,15 @@ def init_user_db():
             conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub_unique ON users(google_sub) WHERE google_sub IS NOT NULL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS games ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, game_key TEXT NOT NULL, "
+            "source TEXT, ref TEXT, white TEXT, black TEXT, result TEXT, reason TEXT, game_date TEXT, "
+            "plies INTEGER, pgn TEXT, analysis_json TEXT, game_json TEXT NOT NULL, saved_at INTEGER NOT NULL, "
+            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "UNIQUE(user_id, game_key), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_games_user_saved ON games(user_id, saved_at)")
 
 
 init_user_db()
@@ -78,6 +176,9 @@ init_user_db()
 
 # --------------------------------------------------------------------------
 # Small helpers
+
+DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((pymysql.err.IntegrityError,) if pymysql is not None else ())
+
 # --------------------------------------------------------------------------
 @app.after_request
 def add_headers(response):
@@ -94,13 +195,24 @@ def add_headers(response):
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
 def error(message, status=400):
     return jsonify({"error": message}), status
+
+
+def active_session_user_id():
+    """Reject a cookie created under a different database backend."""
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    if session.get("db_backend") != DB_BACKEND:
+        session.clear()
+        return None
+    return uid
 
 
 _FEN_ROW = re.compile(r"^[pnbrqkPNBRQK1-8]{1,8}$")
@@ -173,7 +285,7 @@ def get_engine(force_retry=False):
 # --------------------------------------------------------------------------
 @app.get("/api/auth/me")
 def auth_me():
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return jsonify({"authenticated": False, "user": None})
     with db_connect() as conn:
@@ -200,10 +312,11 @@ def auth_register():
         with db_connect() as conn:
             cur = conn.execute("INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)", (username, generate_password_hash(password), email))
             uid = cur.lastrowid
-    except sqlite3.IntegrityError:
+    except DB_INTEGRITY_ERRORS:
         return error("That username or email already exists. Please sign in or use different details.", 409)
     session.clear()
     session["user_id"] = uid
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": uid, "username": username}}), 201
 
@@ -219,6 +332,7 @@ def auth_login():
         return error("Incorrect username or password.", 401)
     session.clear()
     session["user_id"] = row["id"]
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": row["id"], "username": row["username"]}})
 
@@ -277,12 +391,13 @@ def auth_google():
                                        (candidate, generate_password_hash(secrets.token_urlsafe(40)), email, subject))
                     uid, username = cur.lastrowid, candidate
                     break
-                except sqlite3.IntegrityError:
+                except DB_INTEGRITY_ERRORS:
                     continue
             else:
                 return error("Could not create a unique local profile for this Google account.", 409)
     session.clear()
     session["user_id"] = uid
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": uid, "username": username, "email": email}})
 
@@ -324,6 +439,114 @@ def api_chat():
 @app.post("/api/auth/logout")
 def auth_logout():
     session.clear()
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------
+# Account-owned game history
+# --------------------------------------------------------------------------
+@app.get("/api/games")
+def api_list_games():
+    uid = active_session_user_id()
+    if not uid:
+        return error("Sign in to access your saved games.", 401)
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT game_json FROM games WHERE user_id = ? ORDER BY saved_at DESC LIMIT 200",
+            (uid,),
+        ).fetchall()
+    games = []
+    for row in rows:
+        try:
+            item = json.loads(row["game_json"])
+            if isinstance(item, dict):
+                games.append(item)
+        except (TypeError, ValueError):
+            continue
+    return jsonify({"games": games, "count": len(games)})
+
+
+@app.post("/api/games")
+def api_save_game():
+    uid = active_session_user_id()
+    if not uid:
+        return error("Sign in to save games to your account.", 401)
+    if request.content_length and request.content_length > 3_000_000:
+        return error("This game record is too large to save.", 413)
+    entry = request.get_json(silent=True)
+    if not isinstance(entry, dict):
+        return error("A game record is required.")
+    game_key = str(entry.get("id", "")).strip()
+    if not game_key or len(game_key) > 128:
+        return error("The game record needs a valid id (up to 128 characters).")
+    try:
+        saved_at = int(entry.get("savedAt") or time.time() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        saved_at = int(time.time() * 1000)
+    entry["id"] = game_key
+    entry["savedAt"] = saved_at
+    game_json = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    analysis = entry.get("analysis")
+    analysis_json = json.dumps(analysis, ensure_ascii=False, separators=(",", ":")) if analysis is not None else None
+    values = (
+        uid, game_key,
+        str(entry.get("source") or "")[:32] or None,
+        str(entry.get("ref") or "")[:1024] or None,
+        str(entry.get("white") or "")[:255] or None,
+        str(entry.get("black") or "")[:255] or None,
+        str(entry.get("result") or "")[:8] or None,
+        str(entry.get("reason") or "")[:255] or None,
+        str(entry.get("date") or "")[:32] or None,
+        max(0, min(int(entry.get("plies") or 0), 2_000_000)) if str(entry.get("plies") or "0").isdigit() else None,
+        str(entry.get("pgn") or ""),
+        analysis_json, game_json, saved_at,
+    )
+    with db_connect() as conn:
+        if DB_BACKEND == "mysql":
+            conn.execute(
+                "INSERT INTO games "
+                "(user_id, game_key, source, ref, white, black, result, reason, game_date, plies, pgn, analysis_json, game_json, saved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON DUPLICATE KEY UPDATE source=VALUES(source), ref=VALUES(ref), white=VALUES(white), "
+                "black=VALUES(black), result=VALUES(result), reason=VALUES(reason), game_date=VALUES(game_date), "
+                "plies=VALUES(plies), pgn=VALUES(pgn), analysis_json=VALUES(analysis_json), "
+                "game_json=VALUES(game_json), saved_at=VALUES(saved_at), updated_at=CURRENT_TIMESTAMP",
+                values,
+            )
+        else:
+            conn.execute(
+                "INSERT INTO games "
+                "(user_id, game_key, source, ref, white, black, result, reason, game_date, plies, pgn, analysis_json, game_json, saved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(user_id, game_key) DO UPDATE SET source=excluded.source, ref=excluded.ref, "
+                "white=excluded.white, black=excluded.black, result=excluded.result, reason=excluded.reason, "
+                "game_date=excluded.game_date, plies=excluded.plies, pgn=excluded.pgn, "
+                "analysis_json=excluded.analysis_json, game_json=excluded.game_json, "
+                "saved_at=excluded.saved_at, updated_at=CURRENT_TIMESTAMP",
+                values,
+            )
+    return jsonify({"ok": True, "game": entry})
+
+
+@app.delete("/api/games")
+def api_clear_games():
+    uid = active_session_user_id()
+    if not uid:
+        return error("Sign in to clear account history.", 401)
+    with db_connect() as conn:
+        conn.execute("DELETE FROM games WHERE user_id = ?", (uid,))
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/games/<path:game_key>")
+def api_delete_game(game_key):
+    uid = active_session_user_id()
+    if not uid:
+        return error("Sign in to delete account history.", 401)
+    if not game_key or len(game_key) > 128:
+        return error("Invalid game id.")
+    with db_connect() as conn:
+        conn.execute("DELETE FROM games WHERE user_id = ? AND game_key = ?", (uid, game_key))
     return jsonify({"ok": True})
 
 
