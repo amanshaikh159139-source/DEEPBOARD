@@ -19,11 +19,19 @@ browser: frontend/js/chess-rules.js.  The backend only hosts Stockfish.
 import os
 import re
 import sqlite3
+import json
 import secrets
 import time
 import threading
 import requests
 from dotenv import load_dotenv
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+except ImportError:  # SQLite remains usable without the optional MySQL driver.
+    pymysql = None
+    DictCursor = None
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
 
@@ -52,9 +60,54 @@ else:
             _secret_file.write(app.secret_key)
 
 DB_PATH = os.path.join(BASE_DIR, "deepboard_users.sqlite3")
+DB_BACKEND = os.environ.get("DB_BACKEND", "sqlite").strip().lower()
+
+
+class MySQLConnection:
+    """Small sqlite-like adapter so the existing auth queries can use MySQL too."""
+    def __init__(self):
+        if pymysql is None:
+            raise RuntimeError("MySQL mode needs PyMySQL. Run: python -m pip install -r requirements.txt")
+        self.connection = pymysql.connect(
+            host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MYSQL_PORT", "3306")),
+            user=os.environ.get("MYSQL_USER", "root"),
+            password=os.environ.get("MYSQL_PASSWORD", ""),
+            database=os.environ.get("MYSQL_DATABASE", "deepboard_db"),
+            charset="utf8mb4",
+            cursorclass=DictCursor,
+            autocommit=False,
+            connect_timeout=5,
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type is None:
+                self.connection.commit()
+            else:
+                self.connection.rollback()
+        finally:
+            self.connection.close()
+        return False
+
+    def execute(self, sql, params=()):
+        # Existing SQLite queries use ? placeholders and case-insensitive
+        # comparisons. The configured MySQL tables use a case-insensitive collation.
+        sql = re.sub(r"\\s+COLLATE NOCASE\\b", "", sql, flags=re.IGNORECASE)
+        sql = sql.replace("?", "%s")
+        cursor = self.connection.cursor()
+        cursor.execute(sql, params)
+        return cursor
 
 
 def db_connect():
+    if DB_BACKEND == "mysql":
+        return MySQLConnection()
+    if DB_BACKEND != "sqlite":
+        raise RuntimeError("DB_BACKEND must be either 'sqlite' or 'mysql'.")
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -62,6 +115,42 @@ def db_connect():
 
 def init_user_db():
     with db_connect() as conn:
+        if DB_BACKEND == "mysql":
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "username VARCHAR(32) NOT NULL COLLATE utf8mb4_unicode_ci, "
+                "password_hash VARCHAR(255) NOT NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "email VARCHAR(254) NULL, google_sub VARCHAR(255) NULL, "
+                "UNIQUE KEY uq_users_username (username), "
+                "UNIQUE KEY uq_users_email (email), "
+                "UNIQUE KEY uq_users_google_sub (google_sub)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            columns = {row["Field"] for row in conn.execute("SHOW COLUMNS FROM users").fetchall()}
+            if "email" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN email VARCHAR(254) NULL")
+            if "google_sub" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN google_sub VARCHAR(255) NULL")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS games ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "user_id BIGINT UNSIGNED NOT NULL, game_key VARCHAR(128) NOT NULL, "
+                "source VARCHAR(32) NULL, ref VARCHAR(1024) NULL, "
+                "white VARCHAR(255) NULL, black VARCHAR(255) NULL, "
+                "result VARCHAR(8) NULL, reason VARCHAR(255) NULL, "
+                "game_date VARCHAR(32) NULL, plies INT UNSIGNED NULL, pgn LONGTEXT NULL, "
+                "analysis_json LONGTEXT NULL, game_json LONGTEXT NOT NULL, "
+                "saved_at BIGINT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                "UNIQUE KEY uq_games_user_game (user_id, game_key), "
+                "KEY idx_games_user_saved (user_id, saved_at), "
+                "CONSTRAINT fk_games_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            return
+
         conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
         # Additive migrations preserve existing local accounts.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -71,6 +160,15 @@ def init_user_db():
             conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub_unique ON users(google_sub) WHERE google_sub IS NOT NULL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS games ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, game_key TEXT NOT NULL, "
+            "source TEXT, ref TEXT, white TEXT, black TEXT, result TEXT, reason TEXT, game_date TEXT, "
+            "plies INTEGER, pgn TEXT, analysis_json TEXT, game_json TEXT NOT NULL, saved_at INTEGER NOT NULL, "
+            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "UNIQUE(user_id, game_key), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_games_user_saved ON games(user_id, saved_at)")
 
 
 init_user_db()
@@ -78,6 +176,9 @@ init_user_db()
 
 # --------------------------------------------------------------------------
 # Small helpers
+
+DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((pymysql.err.IntegrityError,) if pymysql is not None else ())
+
 # --------------------------------------------------------------------------
 @app.after_request
 def add_headers(response):
@@ -200,7 +301,7 @@ def auth_register():
         with db_connect() as conn:
             cur = conn.execute("INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)", (username, generate_password_hash(password), email))
             uid = cur.lastrowid
-    except sqlite3.IntegrityError:
+    except DB_INTEGRITY_ERRORS:
         return error("That username or email already exists. Please sign in or use different details.", 409)
     session.clear()
     session["user_id"] = uid
