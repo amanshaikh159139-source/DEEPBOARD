@@ -34,17 +34,26 @@
     var a = document.getElementById('account-link');
     if (a) { a.textContent = currentUser ? 'Profile · ' + currentUser.username : 'Sign in'; a.href = currentUser ? '#/profile' : '#/auth'; }
   }
+  function setStoreAccount(user) {
+    return window.Store && Store.setAccount ? Store.setAccount(user) : Promise.resolve();
+  }
   function refresh() {
     return api('/api/auth/me', undefined, 'GET').then(function (d) {
       currentUser = d.authenticated ? d.user : null; refreshAccountLink();
-      if (window.ProfileView) ProfileView.refresh();
-      return currentUser;
-    }).catch(function () { currentUser = null; refreshAccountLink(); return null; });
+      return setStoreAccount(currentUser).then(function () {
+        if (window.ProfileView) ProfileView.refresh();
+        return currentUser;
+      });
+    }).catch(function () {
+      currentUser = null; refreshAccountLink(); setStoreAccount(null); return null;
+    });
   }
   function onLoginSuccess(data) {
     currentUser = data.user; els.password.value = ''; if (els.email) els.email.value = ''; refreshAccountLink();
-    if (window.ProfileView) ProfileView.refresh();
-    App.go('profile'); if (window.U) U.toast('Signed in successfully.', 'success');
+    setStoreAccount(currentUser).then(function () {
+      if (window.ProfileView) ProfileView.refresh();
+      App.go('profile'); if (window.U) U.toast('Signed in successfully.', 'success');
+    });
   }
   function handleGoogleCredential(response) {
     if (!response || !response.credential) { els.error.textContent = 'Google did not return a sign-in credential.'; return; }
@@ -109,6 +118,11 @@
     init: init,
     show: function () { els.error.textContent = ''; refresh(); setupGoogle(); },
     hide: function () {}, refreshAccountLink: refreshAccountLink, refresh: refresh, getUser: function () { return currentUser; },
-    logout: function () { return api('/api/auth/logout', {}).then(function () { currentUser = null; refreshAccountLink(); if (window.ProfileView) ProfileView.refresh(); App.go('home'); }); }
+    logout: function () { return api('/api/auth/logout', {}).then(function () {
+      currentUser = null;
+      return setStoreAccount(null).then(function () {
+        refreshAccountLink(); if (window.ProfileView) ProfileView.refresh(); App.go('home');
+      });
+    }); }
   };
 })(window);
