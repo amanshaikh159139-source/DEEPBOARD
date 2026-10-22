@@ -429,6 +429,114 @@ def auth_logout():
 
 
 # --------------------------------------------------------------------------
+# Account-owned game history
+# --------------------------------------------------------------------------
+@app.get("/api/games")
+def api_list_games():
+    uid = session.get("user_id")
+    if not uid:
+        return error("Sign in to access your saved games.", 401)
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT game_json FROM games WHERE user_id = ? ORDER BY saved_at DESC LIMIT 200",
+            (uid,),
+        ).fetchall()
+    games = []
+    for row in rows:
+        try:
+            item = json.loads(row["game_json"])
+            if isinstance(item, dict):
+                games.append(item)
+        except (TypeError, ValueError):
+            continue
+    return jsonify({"games": games, "count": len(games)})
+
+
+@app.post("/api/games")
+def api_save_game():
+    uid = session.get("user_id")
+    if not uid:
+        return error("Sign in to save games to your account.", 401)
+    if request.content_length and request.content_length > 3_000_000:
+        return error("This game record is too large to save.", 413)
+    entry = request.get_json(silent=True)
+    if not isinstance(entry, dict):
+        return error("A game record is required.")
+    game_key = str(entry.get("id", "")).strip()
+    if not game_key or len(game_key) > 128:
+        return error("The game record needs a valid id (up to 128 characters).")
+    try:
+        saved_at = int(entry.get("savedAt") or time.time() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        saved_at = int(time.time() * 1000)
+    entry["id"] = game_key
+    entry["savedAt"] = saved_at
+    game_json = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    analysis = entry.get("analysis")
+    analysis_json = json.dumps(analysis, ensure_ascii=False, separators=(",", ":")) if analysis is not None else None
+    values = (
+        uid, game_key,
+        str(entry.get("source") or "")[:32] or None,
+        str(entry.get("ref") or "")[:1024] or None,
+        str(entry.get("white") or "")[:255] or None,
+        str(entry.get("black") or "")[:255] or None,
+        str(entry.get("result") or "")[:8] or None,
+        str(entry.get("reason") or "")[:255] or None,
+        str(entry.get("date") or "")[:32] or None,
+        max(0, min(int(entry.get("plies") or 0), 2_000_000)) if str(entry.get("plies") or "0").isdigit() else None,
+        str(entry.get("pgn") or ""),
+        analysis_json, game_json, saved_at,
+    )
+    with db_connect() as conn:
+        if DB_BACKEND == "mysql":
+            conn.execute(
+                "INSERT INTO games "
+                "(user_id, game_key, source, ref, white, black, result, reason, game_date, plies, pgn, analysis_json, game_json, saved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON DUPLICATE KEY UPDATE source=VALUES(source), ref=VALUES(ref), white=VALUES(white), "
+                "black=VALUES(black), result=VALUES(result), reason=VALUES(reason), game_date=VALUES(game_date), "
+                "plies=VALUES(plies), pgn=VALUES(pgn), analysis_json=VALUES(analysis_json), "
+                "game_json=VALUES(game_json), saved_at=VALUES(saved_at), updated_at=CURRENT_TIMESTAMP",
+                values,
+            )
+        else:
+            conn.execute(
+                "INSERT INTO games "
+                "(user_id, game_key, source, ref, white, black, result, reason, game_date, plies, pgn, analysis_json, game_json, saved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(user_id, game_key) DO UPDATE SET source=excluded.source, ref=excluded.ref, "
+                "white=excluded.white, black=excluded.black, result=excluded.result, reason=excluded.reason, "
+                "game_date=excluded.game_date, plies=excluded.plies, pgn=excluded.pgn, "
+                "analysis_json=excluded.analysis_json, game_json=excluded.game_json, "
+                "saved_at=excluded.saved_at, updated_at=CURRENT_TIMESTAMP",
+                values,
+            )
+    return jsonify({"ok": True, "game": entry})
+
+
+@app.delete("/api/games")
+def api_clear_games():
+    uid = session.get("user_id")
+    if not uid:
+        return error("Sign in to clear account history.", 401)
+    with db_connect() as conn:
+        conn.execute("DELETE FROM games WHERE user_id = ?", (uid,))
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/games/<path:game_key>")
+def api_delete_game(game_key):
+    uid = session.get("user_id")
+    if not uid:
+        return error("Sign in to delete account history.", 401)
+    if not game_key or len(game_key) > 128:
+        return error("Invalid game id.")
+    with db_connect() as conn:
+        conn.execute("DELETE FROM games WHERE user_id = ? AND game_key = ?", (uid, game_key))
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------
 # API routes
 # --------------------------------------------------------------------------
 @app.get("/api/ping")
