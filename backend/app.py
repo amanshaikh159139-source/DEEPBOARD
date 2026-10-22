@@ -195,13 +195,24 @@ def add_headers(response):
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
 def error(message, status=400):
     return jsonify({"error": message}), status
+
+
+def active_session_user_id():
+    """Reject a cookie created under a different database backend."""
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    if session.get("db_backend") != DB_BACKEND:
+        session.clear()
+        return None
+    return uid
 
 
 _FEN_ROW = re.compile(r"^[pnbrqkPNBRQK1-8]{1,8}$")
@@ -274,7 +285,7 @@ def get_engine(force_retry=False):
 # --------------------------------------------------------------------------
 @app.get("/api/auth/me")
 def auth_me():
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return jsonify({"authenticated": False, "user": None})
     with db_connect() as conn:
@@ -305,6 +316,7 @@ def auth_register():
         return error("That username or email already exists. Please sign in or use different details.", 409)
     session.clear()
     session["user_id"] = uid
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": uid, "username": username}}), 201
 
@@ -320,6 +332,7 @@ def auth_login():
         return error("Incorrect username or password.", 401)
     session.clear()
     session["user_id"] = row["id"]
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": row["id"], "username": row["username"]}})
 
@@ -384,6 +397,7 @@ def auth_google():
                 return error("Could not create a unique local profile for this Google account.", 409)
     session.clear()
     session["user_id"] = uid
+    session["db_backend"] = DB_BACKEND
     session.permanent = True
     return jsonify({"ok": True, "user": {"id": uid, "username": username, "email": email}})
 
@@ -433,7 +447,7 @@ def auth_logout():
 # --------------------------------------------------------------------------
 @app.get("/api/games")
 def api_list_games():
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return error("Sign in to access your saved games.", 401)
     with db_connect() as conn:
@@ -454,7 +468,7 @@ def api_list_games():
 
 @app.post("/api/games")
 def api_save_game():
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return error("Sign in to save games to your account.", 401)
     if request.content_length and request.content_length > 3_000_000:
@@ -516,7 +530,7 @@ def api_save_game():
 
 @app.delete("/api/games")
 def api_clear_games():
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return error("Sign in to clear account history.", 401)
     with db_connect() as conn:
@@ -526,7 +540,7 @@ def api_clear_games():
 
 @app.delete("/api/games/<path:game_key>")
 def api_delete_game(game_key):
-    uid = session.get("user_id")
+    uid = active_session_user_id()
     if not uid:
         return error("Sign in to delete account history.", 401)
     if not game_key or len(game_key) > 128:
