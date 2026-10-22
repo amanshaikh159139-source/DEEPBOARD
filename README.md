@@ -5,7 +5,7 @@ A chess app that runs entirely on your own computer.
 - **Play the bot** - 200, 800, 1500, 1800, 2000, 2500, and full-strength Stockfish options. Pick your colour, undo, ask for a hint.
 - **Two players, one screen** - pass-and-play with every rule enforced (castling, en passant, promotion, check, checkmate, stalemate, draws).
 - **Analyze games** - paste a PGN, upload a `.pgn` file, or import your recent games from chess.com by username. Every move is rated (Best, Excellent, Good, Inaccuracy, Mistake, Blunder), both players get an accuracy score, and there is an evaluation graph.
-- **History** - finished games and analyses are saved in your browser.
+- **History** - finished games and analyses are cached in the browser and synchronized to the signed-in account database. SQLite is the default; MySQL is optional.
 
 Frontend: plain HTML, CSS and JavaScript (no build step, no frameworks).
 Backend: Python + Flask, which talks to the Stockfish engine.
@@ -86,7 +86,9 @@ chess-app/
     app.py                           Flask server: serves the site + the API
     uci_engine.py                    talks to Stockfish (UCI protocol), difficulty levels
     chesscom.py                      downloads games from the public chess.com API
-    requirements.txt                 Flask, requests, dotenv, Google token verification
+    requirements.txt                 Flask, requests, dotenv, Google auth, optional MySQL driver
+    deepboard_mysql.sql              MySQL schema for XAMPP / phpMyAdmin
+    migrate_sqlite_to_mysql.py       safe one-time account/history migration
     .env.example                     optional Google/AI/Stockfish configuration
     run_server.bat                   runs the local Flask backend
   frontend/
@@ -126,6 +128,10 @@ If Stockfish is unavailable, the app reports engine status and uses the built-in
 | POST | `/api/engine/bestmove` | `{ fen, level 1-7 }` | `{ uci, cp, mate, depth, pv }` |
 | POST | `/api/engine/evaluate` | `{ fen, movetime, depth? }` | `{ uci, cp, mate, depth, pv }` |
 | GET | `/api/chesscom/games` | `?username=...&max=25` | `{ games: [...] }` |
+| GET | `/api/games` | signed-in session | Account-owned saved games |
+| POST | `/api/games` | signed-in session + game JSON | Save or update a game / analysis |
+| DELETE | `/api/games/{id}` | signed-in session | Delete one saved game |
+| DELETE | `/api/games` | signed-in session | Clear the account game history |
 
 Scores `cp` (centipawns) and `mate` are always from White's point of view.
 
@@ -149,7 +155,7 @@ After editing a frontend file just refresh the browser (the server sends no-cach
 
 ## 5. Good to know
 
-- **Games are stored in your browser** (localStorage), not on the server. Clearing site data deletes them. Use "Download PGN" to keep a copy.
+- **Game history** is cached in browser storage for offline use and synced to the server database for signed-in users. Use "Download PGN" for a portable backup. Guest games remain browser-local until the first successful sign-in migration.
 - **Two players means the same screen.** There is no online multiplayer and no chess clock.
 - **chess.com import** reads the public API: the 25 most recent standard-chess games from the last 12 months. It needs an internet connection; everything else works offline (the page fonts fall back to your system fonts).
 - Analysis time per game: roughly (number of half-moves + 1) x the "Analysis depth" time (Quick 0.12 s, Balanced 0.35 s, Deep 1 s).
@@ -176,7 +182,7 @@ After editing a frontend file just refresh the browser (the server sends no-cach
 - **Bots:** approximate 200, 800, 1500, 1800, 2000, and 2500 target ratings plus a full-strength Stockfish option. These ratings are labels, not guaranteed online Elo ratings. Local avatar SVGs are included.
 - **Play experience:** dedicated Play route, enlarged board workspace, and win/loss/draw result overlay with review, rematch, and home actions.
 - **Themes and motion:** four board palettes plus five interface accent themes; transitions respect reduced-motion settings.
-- **Profile:** personal bot-game results use the player's colour. Unsafe insertion of dynamic game text into profile HTML was removed. Existing browser history remains local to that browser and does not sync across devices.
+- **Profile:** personal bot-game results use the player's colour. Unsafe insertion of dynamic game text into profile HTML was removed. Signed-in history is account-specific; cross-device access requires the same backend/database to be reachable.
 - **Chat:** chess help has a local fallback. To enable a general-purpose AI response, set `OPENAI_API_KEY` in `backend/.env`; `OPENAI_MODEL` defaults to `gpt-4o-mini`. The API key stays on the backend and is never put in frontend code.
 
 ## 8. Optional credentials
@@ -185,6 +191,12 @@ After editing a frontend file just refresh the browser (the server sends no-cach
 
 ```dotenv
 DEEPBOARD_SECRET_KEY=
+DB_BACKEND=sqlite
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_DATABASE=deepboard_db
+MYSQL_USER=root
+MYSQL_PASSWORD=
 GOOGLE_CLIENT_ID=your-google-oauth-web-client-id.apps.googleusercontent.com
 OPENAI_API_KEY=your-provider-api-key
 OPENAI_MODEL=gpt-4o-mini
@@ -204,6 +216,43 @@ Only set the variables for services you use. Leave `DEEPBOARD_SECRET_KEY` blank 
 - If Google login is unavailable, check `GOOGLE_CLIENT_ID` in both locations and ensure the OAuth origin is configured. Local password login needs no Google credentials.
 - If general AI chat says it is not configured, add `OPENAI_API_KEY` to `backend/.env` and restart the server. Local chess help remains available without it.
 - If the Stockfish badge remains yellow, inspect `/api/health` at `http://127.0.0.1:5050/api/health`, check `backend/.env`, and confirm the executable matches your operating system and CPU.
-- Games and puzzle statistics are still stored in browser `localStorage`; they do not automatically synchronize between devices/accounts.
+- Puzzle practice statistics and preferences remain browser-local. Game history is cached locally and synced through the current account database when signed in.
+
+
+## 10. Optional XAMPP MySQL / phpMyAdmin and game-history sync
+
+SQLite remains the default so an existing local setup continues to start even when XAMPP is not running. To use MySQL instead:
+
+1. Open XAMPP Control Panel and start **MySQL**. Apache is only needed if you also want to open phpMyAdmin through XAMPP.
+2. Open `http://localhost/phpmyadmin`, choose **Import**, and import `backend/deepboard_mysql.sql`. The file creates `deepboard_db` with `users` and `games` tables.
+3. Edit `backend/.env` (never commit this file) and set:
+   ```dotenv
+   DB_BACKEND=mysql
+   MYSQL_HOST=127.0.0.1
+   MYSQL_PORT=3306
+   MYSQL_DATABASE=deepboard_db
+   MYSQL_USER=root
+   MYSQL_PASSWORD=
+   ```
+   Use the MySQL username and password configured for your own XAMPP installation. A blank root password is only an example for an unmodified local XAMPP setup.
+4. Run `start.bat` again. It installs the new PyMySQL dependency and starts the existing Flask app. Stop and restart a currently-running backend after changing `.env`.
+
+### Move existing SQLite accounts without losing their passwords
+
+The application does **not** automatically copy account records when you switch database engines. The original file `backend/deepboard_users.sqlite3` is preserved. To copy existing user IDs, password hashes, Google account identifiers, and any game rows to an empty MySQL database, first configure `DB_BACKEND=mysql` as above, then run these commands in a terminal:
+
+```bat
+cd backend
+venv\Scripts\activate
+python migrate_sqlite_to_mysql.py
+```
+
+The script refuses to proceed if the MySQL destination already contains users or games, and it never edits or deletes the SQLite source. Keep a backup of the SQLite file before migrating. After migration, restart DeepBoard and sign in with the same account credentials.
+
+### What is synchronized
+
+When signed in, saving a finished game or saving/updating analysis stores the full game record, PGN, result and analysis JSON against that user ID. History is loaded on login; deleting a game or clearing History also updates the account database. Existing browser history is migrated to the first signed-in account on that browser after the server successfully returns account history once. Guest history is still available in its original local browser storage when signed out.
+
+MySQL is optional and does not change the chess rules, Stockfish routes, Google token verification, or local fallback engine. This project is still intended for local development, not direct exposure of Flask's development server to the public internet.
 
 This remains a local student project, not a hardened public production service. Do not expose the Flask development server to the public internet without a separate production/security review.
